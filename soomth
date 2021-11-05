@@ -12,113 +12,141 @@ class Soomth():
         self.amax=amax
         self.jerk=jerk
         self.distance=distance
-        self.te=0
-        self.ts=0
-        self.tmax=0
-
-
+        self.a=self.b=self.c=self.d=self.t1=self.t2=0
+          
+    def calL1(self): # vs<ve
+        smin = (self.amax/(16*self.jerk))*(3*self.ve+5*self.vs)
+        return smin
     
-    def cal_timeOfv(self,a,b,tmax,x):
-        t=symbols('t')
-        f=a*t**3+b*t**2-x
-        new_te = solve(f)
-        k=0
-        for i in new_te:
-            if(i>0):
-                temp=round(i,3)
-                if(temp<2*tmax):
-                    k=temp
-        return k
-
-    def changeve(self,a,b,te,smin):
-        lr=0.01                 #步长
-        v=0.01
-        for t in range(100):
-            self.ve=self.ve-v
-            smin=(smin-lr*self.ve)
-            if(np.abs(self.distance-smin)<0.01):
-                break
-            else:
-                self.te=self.te-lr                      #新的te怎么保存下来
-                if(self.ve==self.vs):
-                    break
+    def step1(self):
+        s_min=self.calL1()
+        if(self.distance>s_min):
+            self.checkDetVel()
+        else:
+            self.modify_Acc()
+            self.modify_Jerk()
+        return True
+        
+    def step2(self):
+        s_min=self.calL2()
+        if(s_min < self.distance):
+            self.checkDetVel2()
+        else:
+            self.amax=3*(self.vs**2-self.ve**2)
+            self.jerk=8*self.amax**2/(3*np.abs(self.vs-self.ve))
         return True
     
-    def calsmin(self,ts,te,a,b):
-    #integrate(函数，（变量，下限， 上限）)
-        t=symbols('t')
-        smin=integrate(a*np.power(t,3)+b*np.power(t,3),(t,ts,te))
-        return smin
-
-    def step1(self,ts,te,a,b,tmax):
-        smin=self.calsmin(ts,te,a,b)
-        if(self.distance>smin):
-            return True
-        else:
-            return False
-
-                     
-    def step2(self,a,b,c,d):
-        sa=self.calsmin(self.ts,2*tmax,a,b)    #vs加速到最大速度需要的距离
-        sd=self.calsmin(self.te,2*tmax,a,b)
-        if( self.distance>(sa-sd)):
-            return sa,sd
-        else:
-            self.step3(a,b)
-     
-    def step3(self,a,b):   #调整最大速度/末速度,让整个同样使用梯度下降的方法, vmax,以及tmax
-        #调整最大速度,vs加速到最大速度的时间也改变了，时间也需要记录下来
-        t=0.01
-        self.tmax=self.tmax-t
-        self.vmax=a*np.power(self.tmax,3)+b*np.power(self.tmax,2)
-        self.step2()
-        
-#     def step4(self,ts,tmax,t):
-#         time=[]
-#         time[0]=
-#         time[1]=
-#         time[2]=
-#         return time
-
-    def calParameter1(self,t1):  #(vs<ve)
-        a= (self.vmax-2*self.amax)/(np.power(t1,3))
-        b= (self.amax/(2*t1)) - (1.5*self.vmax)/np.power(t1,2)-(3*self.amax/np.power(t1,2))
-        return a,b
+    def step3(self):
+        self.a=(-self.jerk**2)/3*self.amax
+        self.b=self.jerk/2
+        self.c=0
+        self.t1=self.amax/self.jerk
+        self.t2=self.amax/(2*self.jerk)
+        return True
     
-    def calParameter2(self,t3):
-        a= self.amax/np.power(t3,2)-3*self.vmax/np.power(t3,3)
-        b= -2*self.amax/t3+self.vmax/(2*np.power(t3,2))
-        return a,b
+    def step4(self):
+        self.a=(self.jerk**2)/12*self.amax
+        self.b=-self.jerk/2
+        self.c=0
+        self.d=self.vs
+        self.t1=(2*self.amax)/self.jerk
+        self.t2=4*self.amax/self.jerk
+        return True
+    
+    def step5(self):
+        x=np.linspace(0,self.t2,1000)    #画出v(t)曲线
+        vt=[self.a*np.power(i,3)+2*self.b*np.power(i,2)+ self.c*i+self.d for i in x]
+        at=[3*self.a*np.power(i,2)+2*self.b*np.power(i,1)+ self.c for i in x]
+        jt=[6*self.a*i +2*self.b for i in x]
+        print(vt[0:10])
+        print(at[0:10])
+        print(jt[0:10])
+        plt.figure(figsize=(8,8),dpi=80)
+        plt.figure(1)
+        A1=plt.subplot(221)
+        A1.plot(x,vt,color='r',linestyle='-')
+        A2=plt.subplot(222)
+        A2.plot(x,at,color='r',linestyle='-')
+        A3=plt.subplot(223)
+        A3.plot(x,jt,color='r',linestyle='-')
+
+    def getDetVel2(self):
+        return 8*self.amax/(3*self.jerk)
+    
+    def checkDetVel2(self):
+        detVel=self.getDetVel2()
+        if( np.abs(self.vs-self.ve)< detVel):
+            self.amax=np.sqrt(3*self.jerk*np.abs(detVel)/8)
+        elif(np.abs(self.vs-self.ve)>detVel):
+            self.jerk=8*self.amax/3*detVel          
+        return 
+        
+    def calL2(self):
+        return 3*(self.vs**2-self.ve**2)/(4*self.amax)
+    
+    def modify_Acc(self):
+        self.amax=( 3*(3*self.ve+5*self.vs)*(self.ve-self.vs) )/(4*self.distance)
+        
+    def modify_Jerk(self):
+        self.jerk = self.amax**2/(12*(self.vs-self.ve))
+        
+    def getdetVel(self): #ve-vs
+        return self.amax**2/(12*self.jerk)
+    
+    def checkDetVel(self):
+        detVel=self.getdetVel()
+        if(np.abs(self.ve-self.vs)> detVel):
+            self.jerk=self.amax**2/(12*detVel)
+        elif(np.abs(self.ve-self.vs)<detVel):
+            self.amax=np.sqrt((self.ve-self.vs)*12*self.jerk)
+        return 
+    
+    def calParameter1(self):  #a=(-J/np.sqrt(6V/J)) b=1/2J; T1=(1/2t2) t2=sqrt(6V/J)
+#         a= -self.jerk/(np.sqrt(6*self.vmax/self.jerk))
+#         b= 0.5*self.jerk
+#         t2=np.sqrt(6*self.vmax/self.jerk)
+#         t1=0.5*t2
+        a=(-self.jerk**2)/3*self.amax
+        b=self.jerk/2
+        c=0
+        d=self.vs
+        t1=self.amax/self.jerk
+        t2=self.amax/(2*self.jerk)
+        return a,b,c,d,t1,t2    #vs<ve
+    
+    def calParameter2(self): #c=J*J/(12A) d=-1/2J ;t3=2*A/J  T4= 4A/J
+#         c = self.jerk**2/(12*self.amax)
+#         d = -0.5*self.jerk
+#         t3=2*self.amax/self.jerk
+#         t4=2*t3
+        a=(self.jerk**2)/12*self.amax
+        b=-self.jerk/2;
+        c=0
+        d=self.vs
+        t1=(2*self.amax)/self.jerk
+        t2=4*self.amax/self.jerk
+        return a,b,c,d,t1,t2
     
     def caltime(self):
         time=[]
-        
-#         x=np.linspace(0,2*tmax,1000)    #画出v(t)曲线
-#         y=[ a*np.power(t,3)+b*np.power(t,2) for t in x]
-#         plt.plot(x,y,'r.')
-#         print(a,b)
         if(self.vs<=self.ve):
             if(self.vs==self.ve and self.ve==self.vmax):
                 time[0]=time[1]=time[2]=self,discrete/self.vmax
                 return time
             else:
-                a,b=self.calParameter1(t) #计算v(t),a(t)的系数
-                a=round(a,3)
-                b=round(b,3)
-                c,d=self.calParameter2(t)
-                self.ts=self.cal_timeOfv(a,b,self.tmax,self.vs)                            #调用
-                self.te=self.cal_timeOfv(a,b,self.tmax,self.ve)
-                if( self.step1( self.ts,self.te,a,b,self.tmax ) ):
-                    sa,sd=self.step2(a,b,c,d)
-#                     time=self.step4(sa,sd)
-                    return time
-                else:
-                    self.changeve(a,b,smin)  #new_te需要修改 梯度下降法
-                    time[0]=self.te-self.ts
-                    return time
-#         else:   #减速运动
-            
+                self.a,self.b,self.c,self.d,self.t1,self.t2=self.calParameter1() #计算v(t),a(t)的系数
+                if(self.step1()):
+                    if(self.step3()):
+                        self.step5()
+                    
+        else:   #减速运动
+            self.a,self.b,self.c,self.d,self.t1,self.t2=self.calParameter2() #计算v(t),a(t)的系数
+            if(self.step2()):
+                if(self.step4()):
+                    self.step5()
 
 if __name__=='__main__':
-    model=Soomth(20,30,300,2000,49280,300)
+    model=Soomth(50,500,300,2000,4000,1000)  #vs,ve,vmax,amax,jerk,distance
     time=model.caltime()
+    
+#     print(time)
